@@ -84,6 +84,7 @@ const Dashboard = () => {
 
       let videoId: string | null = null;
       let videoDescription: string | null = null;
+      let subtasksData: any[] = [];
 
       try {
         const { data: videoData, error: videoError } = await supabase.functions.invoke('find-video', {
@@ -93,6 +94,7 @@ const Dashboard = () => {
         if (!videoError && videoData && !videoData.error) {
           videoId = videoData.videoId;
           videoDescription = `${videoData.title} by ${videoData.channel} - ${videoData.reason}`;
+          subtasksData = videoData.subtasks || [];
         }
       } catch (aiError) {
         console.error('AI video search failed:', aiError);
@@ -111,6 +113,52 @@ const Dashboard = () => {
         .single();
 
       if (error) throw error;
+
+      // Save subtasks and their videos to the database
+      if (data && subtasksData.length > 0) {
+        for (let i = 0; i < subtasksData.length; i++) {
+          const subtask = subtasksData[i];
+          
+          // Insert subtask
+          const { data: subtaskRow, error: subtaskError } = await supabase
+            .from('subtasks')
+            .insert({
+              todo_id: data.id,
+              user_id: user.id,
+              title: subtask.title,
+              order_index: i,
+            })
+            .select()
+            .single();
+
+          if (subtaskError) {
+            console.error('Error saving subtask:', subtaskError);
+            continue;
+          }
+
+          // Insert videos for this subtask
+          if (subtaskRow && subtask.videos?.length > 0) {
+            const videosToInsert = subtask.videos.map((video: any, idx: number) => ({
+              subtask_id: subtaskRow.id,
+              user_id: user.id,
+              video_id: video.videoId,
+              title: video.title,
+              channel: video.channel,
+              engagement_score: video.engagementScore,
+              reason: video.reason,
+              order_index: idx,
+            }));
+
+            const { error: videosError } = await supabase
+              .from('subtask_videos')
+              .insert(videosToInsert);
+
+            if (videosError) {
+              console.error('Error saving subtask videos:', videosError);
+            }
+          }
+        }
+      }
 
       setTodos([data, ...todos]);
       setNewTodoTitle('');
