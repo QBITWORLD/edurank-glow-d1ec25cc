@@ -15,12 +15,30 @@ import { Button } from '@/components/ui/button';
 import Logo from '@/components/Logo';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import SubtasksSidebar from '@/components/SubtasksSidebar';
 
 interface Todo {
   id: string;
   title: string;
   video_id: string | null;
   description: string | null;
+}
+
+interface SubtaskVideo {
+  id: string;
+  video_id: string;
+  title: string;
+  channel: string;
+  engagement_score: number | null;
+  reason: string | null;
+  order_index: number;
+}
+
+interface Subtask {
+  id: string;
+  title: string;
+  order_index: number;
+  videos: SubtaskVideo[];
 }
 
 const VideoPlayer = () => {
@@ -36,6 +54,8 @@ const VideoPlayer = () => {
   const [todo, setTodo] = useState<Todo | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastSavedProgress, setLastSavedProgress] = useState(0);
+  const [subtasks, setSubtasks] = useState<Subtask[]>([]);
+  const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
 
   useEffect(() => {
     if (todoId && user) {
@@ -59,6 +79,39 @@ const VideoPlayer = () => {
         return;
       }
       setTodo(todoData);
+      setCurrentVideoId(todoData.video_id);
+
+      // Fetch subtasks with their videos
+      const { data: subtasksData, error: subtasksError } = await supabase
+        .from('subtasks')
+        .select(`
+          id,
+          title,
+          order_index,
+          subtask_videos (
+            id,
+            video_id,
+            title,
+            channel,
+            engagement_score,
+            reason,
+            order_index
+          )
+        `)
+        .eq('todo_id', todoId)
+        .order('order_index');
+
+      if (subtasksError) {
+        console.error('Error fetching subtasks:', subtasksError);
+      } else if (subtasksData) {
+        const formattedSubtasks: Subtask[] = subtasksData.map((s: any) => ({
+          id: s.id,
+          title: s.title,
+          order_index: s.order_index,
+          videos: s.subtask_videos || [],
+        }));
+        setSubtasks(formattedSubtasks);
+      }
 
       // Fetch existing progress
       const { data: progressData } = await supabase
@@ -148,6 +201,15 @@ const VideoPlayer = () => {
     setPlayer(event.target);
   };
 
+  const handleVideoSelect = (videoId: string) => {
+    setCurrentVideoId(videoId);
+    setProgress(0);
+    setLastSavedProgress(0);
+    if (player) {
+      player.loadVideoById(videoId);
+    }
+  };
+
   const handleGenerateNotes = async () => {
     if (!user || !todoId || !todo?.video_id) return;
 
@@ -225,6 +287,13 @@ const VideoPlayer = () => {
 
   return (
     <div className="min-h-screen flex flex-col">
+      {/* Subtasks Sidebar */}
+      <SubtasksSidebar
+        subtasks={subtasks}
+        onVideoSelect={handleVideoSelect}
+        currentVideoId={currentVideoId}
+      />
+
       {/* Header */}
       <header className="sticky top-0 z-50 glass-card border-b border-border/50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
@@ -251,10 +320,10 @@ const VideoPlayer = () => {
       {/* Video Container */}
       <div className="flex-1 flex flex-col lg:flex-row">
         {/* Video Player */}
-        <div className="flex-1 bg-background">
+        <div className="flex-1 bg-background lg:ml-0">
           <div className="aspect-video w-full max-w-5xl mx-auto">
             <YouTube
-              videoId={todo.video_id}
+              videoId={currentVideoId || todo.video_id}
               opts={opts}
               onReady={onReady}
               className="w-full h-full"
